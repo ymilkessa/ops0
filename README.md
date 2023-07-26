@@ -1,21 +1,40 @@
 # An Open Protocol for Streaming
 
-This is a proposal for a "more flexible" market for monetized audio content on the internet, such as music and podcasts. This includes a public protocol for Digital Rights Management.
+This is a proposal for a "more flexible" market for monetized audio content on the internet, such as music and podcasts. This includes a public protocol for Digital Rights Management, identified here as Open Protocol for Streaming (OPS).
 
 ## Components
 
 1. Hosting servers
    - Servers that host content for artists.
 2. Client applications
-   - Apps that listeners use in their music consumption.
+   - Apps that end users use to consume music and podcasts.
 3. Local Records Module (LRM)
    - A software component inside of user devices.
 
+### Hosting Servers
+
+These are essentially servers with a unique public key id that serve monetized content. Hosting services need to provide a common standard with which any entity on the web can pay for and access their library.
+
+For instance, they could set a certain price per hour of content, or a price per music track or podcast episode. Instead of making micropayments, which could be inefficient, users and applications can pre-pay in larger amounts to the hosting servers, and then consume content until their balance runs out. Alternatively, hosting servers can outsource this role to online banks that can mint Chaumian eCash tokens, which can then be used by apps to pay for individual items efficiently.
+
+As part of strengthening the DRM protocol, hosting servers should temporarily store records of which entities requested which items, as well as the tags used with the requests. (More on this later)
+
+### Client applications
+
+The apps take care of all aspects of the listening experience to users. All user data (identities, play history, playlists) lives and dies with client apps. Potential features include:
+
+1. Save user history, preferences, playlists, etc.
+2. Provide a social media-like experience for users.
+3. Run recommendation algorithms.
+4. Running ads-based or subscription-based services for users.
+
+The client apps should have a unique public key id.
+
 ### Local Records Module
 
-This is a tool that all users who consume content (via this protocol) need to have on their devices as a prerequisite. This could be an operating system package or any other form of open source program that can act as an interface to a device's audio output.
+The LRM is a tool that all users who consume content (via this protocol) need to have on their devices. This could be an operating system package or any other program that can act as an interface to a device's audio output.
 
-The key function of the LRM is to locally record which programs used a device's audio output, when they used it and for how long. Old records can be erased after some duration (see verification window below). When a web browser uses the speaker, the LRM should also record what site it was. By default, all such records should be labelled as "UNTRACKED."
+The key function of the LRM is to locally record which programs used a device's audio output, when they used it and for how long. When a web browser uses the speaker, the LRM should also record what site it was. By default, all such records should be labeled as "UNTRACKED" (or some equivalent marker).
 
 For instance, a single record could look like this in a json format:
 
@@ -23,21 +42,99 @@ For instance, a single record could look like this in a json format:
 {
    "program_identifier_1": "Google Chrome",
    "program_identifier_2": "youtube.com",             // If on a browser, include the website
-   "track_identifier": "lofi hip hop radio ...",
+   "track_title": "lofi hip hop radio ...",
    "start_time": "1690349370",                        // in unix timestamp in seconds
    "end_time": "1690349490",
    "type": "UNTRACKED",                               // untracked item; subsequent fields are left empty
+   "client_app_pubkey": "",
    "host_server_pubkey": "",
    "unique_track_id": "",
+   "computed_hash": "",
    "random_string": "",
-   "host_signature": ""
+   "host_signature": "",
+   "client_signature": ""
 }
 ```
 
-#### TODO: More description needed here
+An application can also play audio content via the "TRACKED" mode. This invokes the OPS protocol described below, in which the application provides evidence to the LRM that the content being served has been paid for. _All applications that serve monetized content via OPS are required to use the "TRACKED" mode._ Any app that fails to do so would risk facing legal consequences.
 
-## Definitions
+The LRM can delete old records after some duration or after being 'pushed' (see Verification below on how these records are used).
 
-`hk`: The public key a hosting server.
+## Protocol
 
-`ck`: Public key of a client application.
+### Definitions
+
+`KH`: The public key a hosting server.
+
+`kh`: The private key of a hosting server.
+
+`KC`: Public key of a client application.
+
+`kc`: Private key of a client application.
+
+`r`: Any random string generated by an LRM.
+
+`Sig(x, k)`: A signature of `x` using the private key `k`.
+
+`Verify(x, K, sig)`: A function that verifies that `sig` is a valid signature of `x` using the public key `K`.
+
+`a`: A hash of a piece of audio content, excluding all metaData. This serves as the unique id of the track.
+
+### Procedure
+
+Here is how content would be served via the protocol.
+
+1. A client app requests the LRM for a random string `r`.
+2. Client app presents `r` to the hosting server, along with the request for a particular content identified by `a`.
+3. Hosting server verifies that the client has enough balance to pay for the content (or that the request came with a valid eCash token).
+4. Hosting server sends `y = Sig((KC, a, r), kh)` to the client app along with the requested content.
+5. Hosting server saves `r`, `KC` and `a`.
+6. The client app generates `z = Sig(z, kc)`.
+7. The client app provides `y`, `z`, `KH` and the title of the content to the LRM.
+8. The LRM saves `KC`, `a`, `r`, `KH` and `z` in its records.
+9. The client app plays the content.
+10. The LRM computes the hash of the content and saves it as the `computed_hash`
+
+As long as the procedure above is followed, the use of content is properly accounted for. Every time a user plays a track, the hosting server is paid for it. The crucial part is what happens whenever any actor violates the protocol, and how the whole system can be setup to minimize violations.
+
+In order to make the user experience more seamless, the host server and the client app can go ahead with playing the content while undergoing the procedure.
+
+## Verification
+
+Hosting servers should have a public endpoint to which users can 'push' either a portion or all of the records generated by their LRM. With this action, each record is sent to the hosting server that provided the content in question. Not all users have to perform this action. For those who do, the hosting servers can reward them with a small portion of the revenue that was collected on their behalf.
+
+If any record leads to a proof that a client has violated the protocol and served unauthorized content, the client can get fined. A portion of the fine should be rewarded to the user whose record initiated the investigation. This incentivizes users to report the illegal selling of content as opposed to collaborating with the scheme. Hence the more users that an app serves illegally, the higher its chances of being caught and punished.
+
+Here is an enumeration of the different classes of violations and how they would be dealt with.
+
+### Tier 1 violations
+
+These are violations that can be detected locally. Here are some examples:
+
+- Client app uses the "UNTRACKED" mode to play monetized content.
+- Client app provides an invalid signature `y` or `z`.
+- The app provides the LRM with the id (`a`), title, and signatures for another content other than the one being played.
+
+Once a hosting server receives records indicating such violations, it can run an investigation to confirm whether or not the app behaves illegally because some records could be fabricated.
+
+### Tier 2 violations
+
+These are violations that can be identified using publicly available information. These include:
+
+- Providing a fake public key for a host server.
+
+As long as the client app's signature is valid, these violations can be identified easily by the hosting servers and the clients can be fined for them.
+
+### Tier 3 violations
+
+A tier 3 violation is when the host server's private key is compromised by the client app. Only the host server itself can detect such cases. It does this by comparing the records it receives with its own records. If it finds a valid record with a request tag (`r`) that it does not recognize, it can flag the case as a security breach.
+
+## Questions and Clarifications
+
+### Would this not require keeping too many records?
+
+Not really. Both the Hosting servers and the LRMs can delete old records. They also have the option of keeping as little or as many records as they want.
+
+### This doesn't eliminate piracy.
+
+Yes, there is no way to completely prevent piracy. It is already possible to download content off of streaming platforms and the same can be done here. Hence there is not much difference in that regard.
